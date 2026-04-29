@@ -3,6 +3,7 @@ import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/rou
 import { AuthService } from './core/auth.service';
 import { ThemeService } from './core/theme.service';
 import { ProfileService } from './core/profile.service';
+import { FriendsService } from './core/friends.service';
 
 @Component({
   selector: 'app-root',
@@ -19,6 +20,10 @@ import { ProfileService } from './core/profile.service';
         <nav class="nav">
           <a routerLink="/home" routerLinkActive="active">Кабінет</a>
           <a routerLink="/courses" routerLinkActive="active">Курси</a>
+          <a routerLink="/friends" routerLinkActive="active" class="with-badge">
+            Друзі
+            @if (incomingCount() > 0) { <span class="badge">{{ incomingCount() }}</span> }
+          </a>
           <a routerLink="/settings" routerLinkActive="active">Налаштування</a>
         </nav>
       }
@@ -87,6 +92,15 @@ import { ProfileService } from './core/profile.service';
     }
     .nav a:hover { color: var(--text); background: var(--bg-elev-2); }
     .nav a.active { color: var(--accent); background: var(--bg-elev-2); }
+    .with-badge { position: relative; display: inline-flex; align-items: center; gap: .35rem; }
+    .with-badge .badge {
+      background: var(--danger); color: #fff;
+      font-size: .65rem; font-weight: 700;
+      min-width: 18px; height: 18px;
+      border-radius: 99px;
+      padding: 0 .35rem;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
     .spacer { flex: 1; }
     .user-pill {
       display: flex; align-items: center; gap: .55rem;
@@ -124,13 +138,22 @@ export class App {
   nickname = computed(() => this.profile.profile()?.nickname ?? this.auth.user()?.email?.split('@')[0] ?? 'User');
   avatar = computed(() => this.profile.profile()?.avatar_url ?? null);
   initials = computed(() => (this.nickname()[0] ?? '?').toUpperCase());
+  incomingCount = computed(() => this.friends.incoming().length);
 
-  constructor(public auth: AuthService, public theme: ThemeService, private profile: ProfileService, private router: Router) {
+  constructor(
+    public auth: AuthService,
+    public theme: ThemeService,
+    private profile: ProfileService,
+    private friends: FriendsService,
+    private router: Router
+  ) {
     effect(() => {
       if (this.auth.isAuthenticated()) {
         this.profile.load().catch(() => {});
+        this.friends.loadAll().catch(() => {});
       } else {
         this.profile.clear();
+        this.friends.clear();
       }
     });
   }
@@ -138,6 +161,7 @@ export class App {
   async logout() {
     await this.auth.signOut();
     this.profile.clear();
+    this.friends.clear();
     this.router.navigate(['/login']);
   }
 }

@@ -3,7 +3,8 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { CoursesService } from '../core/courses.service';
-import { Course, Lesson } from '../core/models';
+import { AuthService } from '../core/auth.service';
+import { Course, CourseVisibility, Lesson } from '../core/models';
 import { toYouTubeEmbed } from '../core/youtube.util';
 
 @Component({
@@ -18,16 +19,26 @@ import { toYouTubeEmbed } from '../core/youtube.util';
       @if (error()) { <p class="err">{{ error() }}</p> }
 
       @if (course(); as c) {
+        @if (!isOwner()) {
+          <div class="shared-banner">
+            👥 Це чужий курс
+            @if (ownerNickname()) { , автор: <strong>&#64;{{ ownerNickname() }}</strong> }
+            . Ти можеш переглядати та позначати свій прогрес — оригінал не зміниться.
+          </div>
+        }
+
         <header class="course-head">
           @if (!editingCourse()) {
             <div class="head-info">
               <h1>{{ c.title }}</h1>
               @if (c.description) { <p class="muted desc">{{ c.description }}</p> }
             </div>
-            <div class="row">
-              <button class="btn btn-ghost btn-sm" (click)="startEditCourse()">Редагувати</button>
-              <button class="btn btn-danger btn-sm" (click)="removeCourse()">Видалити курс</button>
-            </div>
+            @if (isOwner()) {
+              <div class="row">
+                <button class="btn btn-ghost btn-sm" (click)="startEditCourse()">Редагувати</button>
+                <button class="btn btn-danger btn-sm" (click)="removeCourse()">Видалити курс</button>
+              </div>
+            }
           } @else {
             <form class="card edit-form" (ngSubmit)="saveCourse()">
               <input name="title" [(ngModel)]="editTitle" required />
@@ -40,10 +51,41 @@ import { toYouTubeEmbed } from '../core/youtube.util';
           }
         </header>
 
+        @if (isOwner()) {
+          <section class="card visibility-panel">
+            <div class="vis-head">
+              <div>
+                <h3>Доступ до курсу</h3>
+                <p class="muted small">Хто може бачити цей курс і його уроки.</p>
+              </div>
+              @if (savedVis()) { <span class="ok small">✓ Збережено</span> }
+            </div>
+            <div class="vis-options">
+              @for (opt of VIS_OPTIONS; track opt.value) {
+                <button
+                  type="button"
+                  class="vis-opt"
+                  [class.active]="c.visibility === opt.value"
+                  (click)="changeVisibility(opt.value)"
+                >
+                  <span class="vis-icon">{{ opt.icon }}</span>
+                  <span class="vis-name">{{ opt.label }}</span>
+                  <span class="vis-hint muted small">{{ opt.hint }}</span>
+                </button>
+              }
+            </div>
+            @if (c.visibility !== 'private') {
+              <button class="btn btn-ghost btn-sm copy-btn" (click)="copyLink()">
+                {{ copied() ? '✓ Скопійовано' : '🔗 Скопіювати посилання' }}
+              </button>
+            }
+          </section>
+        }
+
         <!-- Progress hero -->
         <section class="progress-hero card">
           <div>
-            <div class="muted small">ТВІЙ ПРОГРЕС</div>
+            <div class="muted small">{{ isOwner() ? 'ТВІЙ ПРОГРЕС' : 'ТВІЙ ПРОГРЕС ПО ЦЬОМУ КУРСУ' }}</div>
             <div class="big-num">{{ percent() }}%</div>
             <div class="muted small">{{ completedCount() }} з {{ lessons().length }} уроків</div>
           </div>
@@ -52,9 +94,9 @@ import { toYouTubeEmbed } from '../core/youtube.util';
             @if (percent() === 100 && lessons().length > 0) {
               <p class="finished">🎉 Курс завершено! Молодець.</p>
             } @else if (lessons().length === 0) {
-              <p class="muted">Додай уроки, щоб почати рухатися.</p>
+              <p class="muted">{{ isOwner() ? 'Додай уроки, щоб почати рухатися.' : 'Уроків поки нема.' }}</p>
             } @else {
-              <p class="muted">Відмічай уроки галочкою — це не звіт, а просто маркер для тебе.</p>
+              <p class="muted">Відмічай уроки галочкою — це особистий маркер тільки для тебе.</p>
             }
           </div>
         </section>
@@ -63,26 +105,28 @@ import { toYouTubeEmbed } from '../core/youtube.util';
 
         <div class="lessons">
           @for (l of lessons(); track l.id; let i = $index) {
-            <article class="lesson card" [class.done]="l.completed">
+            <article class="lesson card" [class.done]="isCompleted(l.id)">
               @if (editingLessonId() !== l.id) {
                 <header class="lesson-head">
                   <button
                     class="check"
-                    [class.checked]="l.completed"
-                    (click)="toggleCompleted(l)"
-                    [attr.aria-label]="l.completed ? 'Зняти відмітку' : 'Відмітити пройденим'"
-                    [title]="l.completed ? 'Знято відмітку' : 'Відмічено пройденим'"
+                    [class.checked]="isCompleted(l.id)"
+                    (click)="toggleCompleted(l.id)"
+                    [attr.aria-label]="isCompleted(l.id) ? 'Зняти відмітку' : 'Відмітити пройденим'"
+                    [title]="isCompleted(l.id) ? 'Знято відмітку' : 'Відмічено пройденим'"
                   >
-                    @if (l.completed) { <span>✓</span> }
+                    @if (isCompleted(l.id)) { <span>✓</span> }
                   </button>
                   <div class="lesson-info">
                     <span class="position">Урок {{ i + 1 }}</span>
                     <h3>{{ l.title }}</h3>
                   </div>
-                  <div class="row">
-                    <button class="btn btn-ghost btn-sm" (click)="startEditLesson(l)">✎</button>
-                    <button class="btn btn-danger btn-sm" (click)="removeLesson(l.id)">✕</button>
-                  </div>
+                  @if (isOwner()) {
+                    <div class="row">
+                      <button class="btn btn-ghost btn-sm" (click)="startEditLesson(l)">✎</button>
+                      <button class="btn btn-danger btn-sm" (click)="removeLesson(l.id)">✕</button>
+                    </div>
+                  }
                 </header>
 
                 @if (embedUrl(l.video_url); as src) {
@@ -90,7 +134,9 @@ import { toYouTubeEmbed } from '../core/youtube.util';
                 }
 
                 @if (l.content) { <p class="content">{{ l.content }}</p> }
-                @if (!l.content && !l.video_url) { <p class="muted faint">Урок поки порожній. Натисни ✎, щоб додати матеріали.</p> }
+                @if (!l.content && !l.video_url) {
+                  <p class="muted faint">{{ isOwner() ? 'Урок поки порожній. Натисни ✎, щоб додати матеріали.' : 'Урок поки порожній.' }}</p>
+                }
               } @else {
                 <form class="lesson-form" (ngSubmit)="saveLesson(l.id)">
                   <input name="t" [(ngModel)]="lessonDraft.title" placeholder="Назва уроку" required />
@@ -107,19 +153,21 @@ import { toYouTubeEmbed } from '../core/youtube.util';
           }
         </div>
 
-        @if (!showLessonForm()) {
-          <button class="btn btn-primary add-btn" (click)="showLessonForm.set(true)">+ Додати урок</button>
-        } @else {
-          <form class="card lesson-form" (ngSubmit)="addLesson()">
-            <h3>Новий урок</h3>
-            <input name="nt" [(ngModel)]="newLesson.title" placeholder="Назва уроку" required />
-            <input name="nv" [(ngModel)]="newLesson.video_url" placeholder="YouTube / Vimeo URL (необовʼязково)" />
-            <textarea name="nc" [(ngModel)]="newLesson.content" placeholder="Текст уроку, нотатки..." rows="6"></textarea>
-            <div class="row">
-              <button type="submit" class="btn btn-primary" [disabled]="!newLesson.title.trim()">Додати</button>
-              <button type="button" class="btn btn-ghost" (click)="showLessonForm.set(false)">Скасувати</button>
-            </div>
-          </form>
+        @if (isOwner()) {
+          @if (!showLessonForm()) {
+            <button class="btn btn-primary add-btn" (click)="showLessonForm.set(true)">+ Додати урок</button>
+          } @else {
+            <form class="card lesson-form" (ngSubmit)="addLesson()">
+              <h3>Новий урок</h3>
+              <input name="nt" [(ngModel)]="newLesson.title" placeholder="Назва уроку" required />
+              <input name="nv" [(ngModel)]="newLesson.video_url" placeholder="YouTube / Vimeo URL (необовʼязково)" />
+              <textarea name="nc" [(ngModel)]="newLesson.content" placeholder="Текст уроку, нотатки..." rows="6"></textarea>
+              <div class="row">
+                <button type="submit" class="btn btn-primary" [disabled]="!newLesson.title.trim()">Додати</button>
+                <button type="button" class="btn btn-ghost" (click)="showLessonForm.set(false)">Скасувати</button>
+              </div>
+            </form>
+          }
         }
       }
     </div>
@@ -127,10 +175,42 @@ import { toYouTubeEmbed } from '../core/youtube.util';
   styles: [`
     .back { color: var(--text-muted); display: inline-block; margin: 1rem 0 0; font-size: .9rem; }
     .back:hover { color: var(--accent); }
+
+    .shared-banner {
+      margin-top: 1rem; padding: .85rem 1rem;
+      background: var(--bg-elev-2); border: 1px solid var(--accent);
+      border-radius: var(--radius-sm);
+      color: var(--text); font-size: .9rem;
+    }
+
     .course-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; padding: 1.5rem 0; }
     .head-info h1 { margin: 0 0 .5rem; }
     .desc { max-width: 640px; }
     .edit-form { display: flex; flex-direction: column; gap: .75rem; flex: 1; }
+
+    .visibility-panel { margin-bottom: 1.25rem; }
+    .vis-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem; }
+    .vis-head h3 { margin: 0 0 .15rem; }
+    .vis-head p { margin: 0; }
+    .vis-options { display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem; }
+    .vis-opt {
+      background: var(--bg-elev-2);
+      border: 2px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: .85rem .75rem;
+      text-align: left;
+      cursor: pointer;
+      display: flex; flex-direction: column; gap: .25rem;
+      transition: border-color .15s;
+      color: var(--text);
+    }
+    .vis-opt:hover { border-color: var(--accent-hover); }
+    .vis-opt.active { border-color: var(--accent); }
+    .vis-icon { font-size: 1.25rem; }
+    .vis-name { font-weight: 600; }
+    .vis-hint { line-height: 1.4; }
+    .copy-btn { margin-top: .85rem; }
+    .small { font-size: .8rem; }
 
     .progress-hero {
       display: grid; grid-template-columns: auto 1fr; gap: 2rem;
@@ -138,7 +218,6 @@ import { toYouTubeEmbed } from '../core/youtube.util';
       margin-bottom: 1rem;
     }
     .big-num { font-size: 3rem; font-weight: 700; color: var(--accent); line-height: 1; margin: .25rem 0; }
-    .small { font-size: .8rem; }
     .bar-wrap { display: flex; flex-direction: column; gap: .75rem; }
     .bar { height: 8px; background: var(--bg-elev-3); border-radius: 99px; overflow: hidden; }
     .fill { height: 100%; background: var(--accent); transition: width .35s; }
@@ -185,14 +264,25 @@ import { toYouTubeEmbed } from '../core/youtube.util';
       .progress-hero { grid-template-columns: 1fr; }
       .big-num { font-size: 2.25rem; }
       .course-head { flex-direction: column; }
+      .vis-options { grid-template-columns: 1fr; }
     }
   `]
 })
 export class CourseDetailComponent implements OnInit {
+  readonly VIS_OPTIONS: { value: CourseVisibility; icon: string; label: string; hint: string }[] = [
+    { value: 'private', icon: '🔒', label: 'Приватний', hint: 'Бачиш тільки ти' },
+    { value: 'friends', icon: '👥', label: 'Лише для друзів', hint: 'Бачать твої прийняті друзі' },
+    { value: 'public', icon: '🌍', label: 'Публічний', hint: 'Будь-хто з посиланням' }
+  ];
+
   course = signal<Course | null>(null);
   lessons = signal<Lesson[]>([]);
+  completedSet = signal<Set<string>>(new Set());
+  ownerNickname = signal<string | null>(null);
   loading = signal(false);
   error = signal<string | null>(null);
+  savedVis = signal(false);
+  copied = signal(false);
 
   editingCourse = signal(false);
   editTitle = '';
@@ -204,7 +294,12 @@ export class CourseDetailComponent implements OnInit {
   editingLessonId = signal<string | null>(null);
   lessonDraft: { title: string; content: string; video_url: string; position: number } = { title: '', content: '', video_url: '', position: 0 };
 
-  completedCount = computed(() => this.lessons().filter(l => l.completed).length);
+  isOwner = computed(() => {
+    const c = this.course();
+    return c ? c.user_id === this.auth.user()?.id : false;
+  });
+
+  completedCount = computed(() => this.lessons().filter(l => this.completedSet().has(l.id)).length);
   percent = computed(() => {
     const total = this.lessons().length;
     return total === 0 ? 0 : Math.round((this.completedCount() / total) * 100);
@@ -216,6 +311,7 @@ export class CourseDetailComponent implements OnInit {
     private route: ActivatedRoute,
     private router: Router,
     private coursesSvc: CoursesService,
+    private auth: AuthService,
     private sanitizer: DomSanitizer
   ) {}
 
@@ -224,17 +320,29 @@ export class CourseDetailComponent implements OnInit {
     await this.load();
   }
 
+  isCompleted(lessonId: string): boolean {
+    return this.completedSet().has(lessonId);
+  }
+
   async load() {
     this.loading.set(true);
     this.error.set(null);
     try {
-      const [c, ls] = await Promise.all([
+      const [c, ls, progress] = await Promise.all([
         this.coursesSvc.getCourse(this.courseId),
-        this.coursesSvc.listLessons(this.courseId)
+        this.coursesSvc.listLessons(this.courseId),
+        this.coursesSvc.listMyProgressForCourse(this.courseId)
       ]);
       if (!c) { this.router.navigate(['/courses']); return; }
       this.course.set(c);
       this.lessons.set(ls);
+      this.completedSet.set(progress);
+      if (c.user_id !== this.auth.user()?.id) {
+        try {
+          const owner = await this.coursesSvc.getCourseOwner(c.user_id);
+          this.ownerNickname.set(owner?.nickname ?? null);
+        } catch {}
+      }
     } catch (e: any) {
       this.error.set(e.message);
     } finally {
@@ -247,15 +355,45 @@ export class CourseDetailComponent implements OnInit {
     return embed ? this.sanitizer.bypassSecurityTrustResourceUrl(embed) : null;
   }
 
-  async toggleCompleted(l: Lesson) {
-    const next = !l.completed;
-    this.lessons.update(arr => arr.map(x => x.id === l.id ? { ...x, completed: next } : x));
+  async toggleCompleted(lessonId: string) {
+    const wasDone = this.completedSet().has(lessonId);
+    const next = !wasDone;
+    this.completedSet.update(s => {
+      const ns = new Set(s);
+      if (next) ns.add(lessonId); else ns.delete(lessonId);
+      return ns;
+    });
     try {
-      await this.coursesSvc.setLessonCompleted(l.id, next);
+      await this.coursesSvc.setLessonCompleted(lessonId, next);
     } catch (e: any) {
       this.error.set(e.message);
-      this.lessons.update(arr => arr.map(x => x.id === l.id ? { ...x, completed: !next } : x));
+      this.completedSet.update(s => {
+        const ns = new Set(s);
+        if (wasDone) ns.add(lessonId); else ns.delete(lessonId);
+        return ns;
+      });
     }
+  }
+
+  async changeVisibility(v: CourseVisibility) {
+    const c = this.course();
+    if (!c || c.visibility === v) return;
+    try {
+      await this.coursesSvc.setVisibility(c.id, v);
+      this.course.set({ ...c, visibility: v });
+      this.savedVis.set(true);
+      setTimeout(() => this.savedVis.set(false), 2000);
+    } catch (e: any) {
+      this.error.set(e.message);
+    }
+  }
+
+  async copyLink() {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      this.copied.set(true);
+      setTimeout(() => this.copied.set(false), 2000);
+    } catch {}
   }
 
   startEditCourse() {

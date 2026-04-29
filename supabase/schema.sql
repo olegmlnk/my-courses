@@ -135,3 +135,160 @@ create policy "avatars_delete_own" on storage.objects
     bucket_id = 'avatars'
     and auth.uid()::text = (storage.foldername(name))[1]
   );
+
+-- ============ FRIENDS & SHARING (Phase 2) ============
+
+-- 1. Course visibility
+alter table public.courses
+  add column if not exists visibility text not null default 'private'
+  check (visibility in ('private', 'friends', 'public'));
+create index if not exists idx_courses_visibility on public.courses(visibility);
+
+-- 2. Unique nickname (handle-style). Existing duplicates need manual cleanup before this passes.
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'profiles_nickname_unique') then
+    alter table public.profiles add constraint profiles_nickname_unique unique (nickname);
+  end if;
+end$$;
+
+-- 3. Friendships
+create table if not exists public.friendships (
+  id uuid primary key default gen_random_uuid(),
+  requester_id uuid not null references auth.users(id) on delete cascade,
+  addressee_id uuid not null references auth.users(id) on delete cascade,
+  status text not null default 'pending' check (status in ('pending', 'accepted', 'rejected')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (requester_id, addressee_id),
+  check (requester_id <> addressee_id)
+);
+create index if not exists idx_friendships_requester on public.friendships(requester_id);
+create index if not exists idx_friendships_addressee on public.friendships(addressee_id);
+
+alter table public.friendships enable row level security;
+
+drop policy if exists "friendships_select_involved" on public.friendships;
+create policy "friendships_select_involved" on public.friendships for select using (
+  auth.uid() = requester_id or auth.uid() = addressee_id
+);
+drop policy if exists "friendships_insert_self" on public.friendships;
+create policy "friendships_insert_self" on public.friendships for insert with check (
+  auth.uid() = requester_id
+);
+drop policy if exists "friendships_update_addressee" on public.friendships;
+create policy "friendships_update_addressee" on public.friendships for update using (
+  auth.uid() = addressee_id
+) with check (auth.uid() = addressee_id);
+drop policy if exists "friendships_delete_involved" on public.friendships;
+create policy "friendships_delete_involved" on public.friendships for delete using (
+  auth.uid() = requester_id or auth.uid() = addressee_id
+);
+
+-- Helper: is this user a friend of mine (accepted)?
+create or replace function public.is_friend(other_id uuid)
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select exists (
+    select 1 from public.friendships f
+    where f.status = 'accepted'
+      and (
+        (f.requester_id = auth.uid() and f.addressee_id = other_id) or
+        (f.addressee_id = auth.uid() and f.requester_id = other_id)
+      )
+  );
+$$;
+grant execute on function public.is_friend(uuid) to authenticated;
+
+-- 4. Per-user lesson progress
+create table if not exists public.lesson_progress (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  lesson_id uuid not null references public.lessons(id) on delete cascade,
+  completed boolean not null default true,
+  completed_at timestamptz not null default now(),
+  primary key (user_id, lesson_id)
+);
+create index if not exists idx_lesson_progress_lesson on public.lesson_progress(lesson_id);
+
+alter table public.lesson_progress enable row level security;
+
+drop policy if exists "lp_select_own" on public.lesson_progress;
+create policy "lp_select_own" on public.lesson_progress for select using (auth.uid() = user_id);
+drop policy if exists "lp_insert_own" on public.lesson_progress;
+create policy "lp_insert_own" on public.lesson_progress for insert with check (auth.uid() = user_id);
+drop policy if exists "lp_update_own" on public.lesson_progress;
+create policy "lp_update_own" on public.lesson_progress for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists "lp_delete_own" on public.lesson_progress;
+create policy "lp_delete_own" on public.lesson_progress for delete using (auth.uid() = user_id);
+
+-- One-time backfill: migrate old lessons.completed (owner-only) into lesson_progress
+insert into public.lesson_progress (user_id, lesson_id, completed)
+select l.user_id, l.id, true
+from public.lessons l
+where l.completed = true
+on conflict (user_id, lesson_id) do nothing;
+
+-- 5. Relax profiles SELECT — any authenticated user can read id/nickname/avatar_url for search
+drop policy if exists "profiles_select_own" on public.profiles;
+drop policy if exists "profiles_select_authenticated" on public.profiles;
+create policy "profiles_select_authenticated" on public.profiles
+  for select to authenticated using (true);
+
+-- 6. Expand courses SELECT: own + public + friends-of-owner
+drop policy if exists "courses_select_own" on public.courses;
+drop policy if exists "courses_select_visible" on public.courses;
+create policy "courses_select_visible" on public.courses for select using (
+  auth.uid() = user_id
+  or visibility = 'public'
+  or (visibility = 'friends' and public.is_friend(user_id))
+);
+
+-- 7. Expand lessons SELECT: own + lessons of any visible course
+drop policy if exists "lessons_select_own" on public.lessons;
+drop policy if exists "lessons_select_visible" on public.lessons;
+create policy "lessons_select_visible" on public.lessons for select using (
+  auth.uid() = user_id
+  or exists (
+    select 1 from public.courses c
+    where c.id = lessons.course_id
+      and (
+        c.visibility = 'public'
+        or (c.visibility = 'friends' and public.is_friend(c.user_id))
+      )
+  )
+);
+
+-- 8. User search RPC (auto-detects email vs nickname by '@')
+create or replace function public.search_users(q text)
+returns table (id uuid, nickname text, avatar_url text, matched_by text)
+language plpgsql stable security definer set search_path = public, auth
+as $$
+declare
+  norm text := trim(q);
+begin
+  if norm is null or length(norm) < 2 then
+    return;
+  end if;
+
+  if position('@' in norm) > 0 then
+    return query
+    select p.id, p.nickname, p.avatar_url, 'email'::text
+    from auth.users u
+    join public.profiles p on p.id = u.id
+    where u.email ilike '%' || norm || '%'
+      and u.id <> auth.uid()
+    limit 20;
+  else
+    return query
+    select p.id, p.nickname, p.avatar_url, 'nickname'::text
+    from public.profiles p
+    where p.nickname ilike '%' || norm || '%'
+      and p.id <> auth.uid()
+    limit 20;
+  end if;
+end;
+$$;
+
+revoke all on function public.search_users(text) from public;
+grant execute on function public.search_users(text) to authenticated;

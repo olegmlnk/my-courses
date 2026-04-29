@@ -38,5 +38,10 @@ export const routes: Routes = [
     canActivate: [authGuard],
     loadComponent: () => import('./profile/profile.component').then(m => m.ProfileComponent)
   },
+  {
+    path: 'friends',
+    canActivate: [authGuard],
+    loadComponent: () => import('./friends/friends.component').then(m => m.FriendsComponent)
+  },
   { path: '**', redirectTo: 'home' }
 ];
