@@ -68,3 +68,18 @@ export interface LessonProgress {
   completed: boolean;
   completed_at: string;
 }
+
+export interface LessonBookmark {
+  id: string;
+  user_id: string;
+  lesson_id: string;
+  timestamp_seconds: number;
+  note: string | null;
+  created_at: string;
+}
+
+export interface StreakInfo {
+  current_streak: number;
+  longest_streak: number;
+  today_count: number;
+}

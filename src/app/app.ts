@@ -4,6 +4,7 @@ import { AuthService } from './core/auth.service';
 import { ThemeService } from './core/theme.service';
 import { ProfileService } from './core/profile.service';
 import { FriendsService } from './core/friends.service';
+import { StreakService } from './core/streak.service';
 
 @Component({
   selector: 'app-root',
@@ -31,6 +32,11 @@ import { FriendsService } from './core/friends.service';
       <div class="spacer"></div>
 
       @if (auth.isAuthenticated()) {
+        @if (currentStreak() > 0) {
+          <a routerLink="/home" class="streak-pill" [title]="streakTitle()">
+            🔥 <span class="streak-num">{{ currentStreak() }}</span>
+          </a>
+        }
         <button class="btn btn-ghost btn-sm" (click)="theme.toggle()" title="Тема">
           @if (theme.theme() === 'dark') { ☀️ } @else { 🌙 }
         </button>
@@ -101,6 +107,19 @@ import { FriendsService } from './core/friends.service';
       padding: 0 .35rem;
       display: inline-flex; align-items: center; justify-content: center;
     }
+    .streak-pill {
+      display: inline-flex; align-items: center; gap: .35rem;
+      padding: .3rem .7rem;
+      background: var(--bg-elev-2);
+      border: 1px solid var(--border);
+      border-radius: 99px;
+      color: var(--text);
+      font-size: .85rem;
+      text-decoration: none;
+      transition: border-color .15s;
+    }
+    .streak-pill:hover { border-color: #FF7A00; color: var(--text); }
+    .streak-num { font-weight: 700; color: #FF7A00; }
     .spacer { flex: 1; }
     .user-pill {
       display: flex; align-items: center; gap: .55rem;
@@ -139,21 +158,29 @@ export class App {
   avatar = computed(() => this.profile.profile()?.avatar_url ?? null);
   initials = computed(() => (this.nickname()[0] ?? '?').toUpperCase());
   incomingCount = computed(() => this.friends.incoming().length);
+  currentStreak = computed(() => this.streakSvc.streak().current_streak);
+  streakTitle = computed(() => {
+    const s = this.streakSvc.streak();
+    return `${s.current_streak} днів поспіль · сьогодні: ${s.today_count} · рекорд: ${s.longest_streak}`;
+  });
 
   constructor(
     public auth: AuthService,
     public theme: ThemeService,
     private profile: ProfileService,
     private friends: FriendsService,
+    private streakSvc: StreakService,
     private router: Router
   ) {
     effect(() => {
       if (this.auth.isAuthenticated()) {
         this.profile.load().catch(() => {});
         this.friends.loadAll().catch(() => {});
+        this.streakSvc.load().catch(() => {});
       } else {
         this.profile.clear();
         this.friends.clear();
+        this.streakSvc.clear();
       }
     });
   }
@@ -162,6 +189,7 @@ export class App {
     await this.auth.signOut();
     this.profile.clear();
     this.friends.clear();
+    this.streakSvc.clear();
     this.router.navigate(['/login']);
   }
 }

@@ -292,3 +292,83 @@ $$;
 
 revoke all on function public.search_users(text) from public;
 grant execute on function public.search_users(text) to authenticated;
+
+-- ============ STREAKS (Phase 3) ============
+create or replace function public.get_my_streak()
+returns table (current_streak integer, longest_streak integer, today_count integer)
+language plpgsql stable security definer set search_path = public
+as $$
+declare
+  me uuid := auth.uid();
+  rec record;
+  prev_d date;
+  cur_run int := 0;
+  best int := 0;
+  today_d date := current_date;
+  yesterday_d date := current_date - 1;
+  effective_current int := 0;
+  today_n int := 0;
+begin
+  if me is null then
+    current_streak := 0; longest_streak := 0; today_count := 0;
+    return next;
+    return;
+  end if;
+
+  for rec in
+    select distinct (completed_at)::date as d
+    from public.lesson_progress
+    where user_id = me and completed = true
+    order by d
+  loop
+    if prev_d is null then
+      cur_run := 1;
+    elsif rec.d = prev_d + 1 then
+      cur_run := cur_run + 1;
+    else
+      cur_run := 1;
+    end if;
+    if cur_run > best then best := cur_run; end if;
+    prev_d := rec.d;
+  end loop;
+
+  if prev_d = today_d or prev_d = yesterday_d then
+    effective_current := cur_run;
+  end if;
+
+  select count(*)::int into today_n
+  from public.lesson_progress
+  where user_id = me and completed = true
+    and (completed_at)::date = today_d;
+
+  current_streak := effective_current;
+  longest_streak := best;
+  today_count := today_n;
+  return next;
+end;
+$$;
+
+revoke all on function public.get_my_streak() from public;
+grant execute on function public.get_my_streak() to authenticated;
+
+-- ============ VIDEO BOOKMARKS (Phase 3) ============
+create table if not exists public.lesson_bookmarks (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  lesson_id uuid not null references public.lessons(id) on delete cascade,
+  timestamp_seconds int not null check (timestamp_seconds >= 0),
+  note text,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_bookmarks_user_lesson on public.lesson_bookmarks(user_id, lesson_id);
+
+alter table public.lesson_bookmarks enable row level security;
+
+drop policy if exists "bookmarks_select_own" on public.lesson_bookmarks;
+create policy "bookmarks_select_own" on public.lesson_bookmarks for select using (auth.uid() = user_id);
+drop policy if exists "bookmarks_insert_own" on public.lesson_bookmarks;
+create policy "bookmarks_insert_own" on public.lesson_bookmarks for insert with check (auth.uid() = user_id);
+drop policy if exists "bookmarks_update_own" on public.lesson_bookmarks;
+create policy "bookmarks_update_own" on public.lesson_bookmarks for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists "bookmarks_delete_own" on public.lesson_bookmarks;
+create policy "bookmarks_delete_own" on public.lesson_bookmarks for delete using (auth.uid() = user_id);

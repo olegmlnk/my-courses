@@ -1,7 +1,8 @@
-import { Component, OnInit, computed, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { CoursesService } from '../core/courses.service';
 import { ProfileService } from '../core/profile.service';
+import { StreakService } from '../core/streak.service';
 import { CourseWithProgress } from '../core/models';
 
 const QUOTES = [
@@ -24,6 +25,25 @@ const QUOTES = [
         <p class="kicker">{{ greetingPrefix() }}</p>
         <h1>{{ greeting() }}, <span class="accent">{{ nickname() }}</span> 👋</h1>
         <p class="quote">"{{ quote() }}"</p>
+      </section>
+
+      <section class="streak-banner card" [class.active]="streak().current_streak > 0">
+        <div class="streak-icon">🔥</div>
+        <div class="streak-body">
+          @if (streak().current_streak > 0) {
+            <h2><span class="num">{{ streak().current_streak }}</span> {{ daysWord(streak().current_streak) }} поспіль</h2>
+            <p class="muted">
+              Сьогодні: {{ streak().today_count }} уроків. Особистий рекорд: {{ streak().longest_streak }}.
+              @if (streak().today_count === 0) { <span class="warn">Не зривай ланцюжок — пройди хоча б 1 урок сьогодні.</span> }
+            </p>
+          } @else if (streak().longest_streak > 0) {
+            <h2>Серія обнулилася</h2>
+            <p class="muted">Твій рекорд був <strong>{{ streak().longest_streak }}</strong> днів. Почни нову — пройди урок сьогодні.</p>
+          } @else {
+            <h2>Почни свою першу серію</h2>
+            <p class="muted">Проходь хоча б 1 урок щодня — лічильник буде рости.</p>
+          }
+        </div>
       </section>
 
       <section class="stats">
@@ -88,7 +108,20 @@ const QUOTES = [
     .accent { color: var(--accent); }
     .quote { color: var(--text-muted); font-style: italic; max-width: 580px; }
 
-    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin: 1.5rem 0 2.5rem; }
+    .streak-banner {
+      display: flex; align-items: center; gap: 1.25rem;
+      padding: 1.25rem 1.5rem;
+      margin: 1.25rem 0 1rem;
+      border-left: 4px solid var(--bg-elev-3);
+    }
+    .streak-banner.active { border-left-color: #FF7A00; }
+    .streak-icon { font-size: 2.5rem; flex-shrink: 0; }
+    .streak-body h2 { margin: 0 0 .25rem; font-size: 1.15rem; }
+    .streak-body p { margin: 0; }
+    .streak-body .num { color: #FF7A00; font-weight: 800; font-size: 1.5rem; }
+    .streak-body .warn { color: var(--accent); display: block; margin-top: .25rem; font-weight: 500; }
+
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin: 1rem 0 2.5rem; }
     .stat-card {
       background: var(--bg-elev-1);
       border: 1px solid var(--border);
@@ -151,7 +184,13 @@ export class HomeComponent implements OnInit {
     return s.lessons === 0 ? 0 : Math.round((s.completed / s.lessons) * 100);
   });
 
-  constructor(private coursesSvc: CoursesService, private profile: ProfileService) {}
+  private streakSvc = inject(StreakService);
+  streak = this.streakSvc.streak;
+
+  constructor(
+    private coursesSvc: CoursesService,
+    private profile: ProfileService
+  ) {}
 
   async ngOnInit() {
     if (!this.profile.profile()) { try { await this.profile.load(); } catch {} }
@@ -163,9 +202,17 @@ export class HomeComponent implements OnInit {
       this.stats.set(s);
       this.recent.set(list.slice(0, 3));
     } catch {}
+    try { await this.streakSvc.load(); } catch {}
   }
 
   pct(c: CourseWithProgress): number {
     return c.total_lessons === 0 ? 0 : Math.round((c.completed_lessons / c.total_lessons) * 100);
+  }
+
+  daysWord(n: number): string {
+    const mod10 = n % 10, mod100 = n % 100;
+    if (mod10 === 1 && mod100 !== 11) return 'день';
+    if ([2, 3, 4].includes(mod10) && ![12, 13, 14].includes(mod100)) return 'дні';
+    return 'днів';
   }
 }
