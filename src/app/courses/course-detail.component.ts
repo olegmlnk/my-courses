@@ -1,21 +1,13 @@
-import { Component, OnInit, computed, effect, signal } from '@angular/core';
+import { Component, OnInit, computed, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { DomSanitizer, SafeHtml, SafeResourceUrl } from '@angular/platform-browser';
 import { CoursesService } from '../core/courses.service';
 import { AuthService } from '../core/auth.service';
-import { BookmarksService } from '../core/bookmarks.service';
 import { StreakService } from '../core/streak.service';
-import { Course, CourseVisibility, Lesson, LessonBookmark } from '../core/models';
-import { extractYouTubeId, formatTimestamp, parseTimestamp, toYouTubeEmbed } from '../core/youtube.util';
+import { Course, CourseVisibility, Lesson } from '../core/models';
+import { toYouTubeEmbed } from '../core/youtube.util';
 import { renderMarkdown } from '../core/markdown.util';
-
-declare global {
-  interface Window {
-    YT: any;
-    onYouTubeIframeAPIReady: () => void;
-  }
-}
 
 @Component({
   selector: 'app-course-detail',
@@ -33,7 +25,7 @@ declare global {
           <div class="shared-banner">
             👥 Це чужий курс
             @if (ownerNickname()) { , автор: <strong>&#64;{{ ownerNickname() }}</strong> }
-            . Ти можеш переглядати, відмічати свій прогрес і зберігати свої закладки на відео.
+            . Ти можеш переглядати та відмічати свій прогрес — оригінал не зміниться.
           </div>
         }
 
@@ -138,56 +130,7 @@ declare global {
                   }
                 </header>
 
-                @if (youtubeId(l.video_url); as ytId) {
-                  <div class="video">
-                    <iframe
-                      [id]="'yt-' + l.id"
-                      [src]="ytEmbedUrl(ytId)"
-                      frameborder="0"
-                      allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture"
-                      allowfullscreen
-                    ></iframe>
-                  </div>
-                  <div class="bookmarks-block">
-                    <div class="bm-add">
-                      <button class="btn btn-primary btn-sm" type="button" (click)="addBookmarkAtCurrent(l.id)">
-                        ⏱ Зберегти зараз: {{ liveTime(l.id) }}
-                      </button>
-                      <input
-                        type="text"
-                        class="bm-time-input"
-                        placeholder="або вручну: 1:23"
-                        [value]="manualTimes()[l.id] ?? ''"
-                        (input)="setManualTime(l.id, $any($event.target).value)"
-                      />
-                      <input
-                        type="text"
-                        class="bm-note-input"
-                        placeholder="Нотатка (опційно)"
-                        [value]="bookmarkNotes()[l.id] ?? ''"
-                        (input)="setBookmarkNote(l.id, $any($event.target).value)"
-                      />
-                      <button class="btn btn-ghost btn-sm" type="button" (click)="addBookmarkManual(l.id)" [disabled]="!manualTimes()[l.id]">
-                        + Додати
-                      </button>
-                    </div>
-                    @if (bookmarksFor(l.id).length > 0) {
-                      <div class="bm-list">
-                        @for (b of bookmarksFor(l.id); track b.id) {
-                          <div class="bm-item">
-                            <button class="bm-time" (click)="seekTo(l.id, b.timestamp_seconds)" [title]="'Перейти на ' + formatTime(b.timestamp_seconds)">
-                              ▶ {{ formatTime(b.timestamp_seconds) }}
-                            </button>
-                            @if (b.note) { <span class="bm-note">{{ b.note }}</span> }
-                            <button class="bm-del" (click)="removeBookmark(b.id)" title="Видалити">✕</button>
-                          </div>
-                        }
-                      </div>
-                    } @else {
-                      <p class="muted small bm-hint">Закладки на конкретні моменти відео — щоб не шукати потрібну хвилину наступного разу.</p>
-                    }
-                  </div>
-                } @else if (embedUrl(l.video_url); as src) {
+                @if (embedUrl(l.video_url); as src) {
                   <div class="video"><iframe [src]="src" frameborder="0" allowfullscreen></iframe></div>
                 }
 
@@ -289,15 +232,23 @@ declare global {
     .fill { height: 100%; background: var(--accent); transition: width .35s; }
     .finished { color: var(--success); font-weight: 600; margin: 0; }
 
-    .lessons { display: flex; flex-direction: column; gap: .75rem; }
-    .lesson { padding: 1.25rem; transition: opacity .2s; min-width: 0; overflow: hidden; }
+    .lessons { display: flex; flex-direction: column; gap: .75rem; min-width: 0; }
+    .lesson {
+      padding: 1.25rem;
+      transition: opacity .2s;
+      min-width: 0;
+      max-width: 100%;
+    }
     .lesson.done { opacity: .7; }
     .lesson.done .lesson-info h3 { text-decoration: line-through; color: var(--text-muted); }
 
     .lesson-head { display: flex; align-items: flex-start; gap: 1rem; }
-    .lesson-info { flex: 1; }
+    .lesson-info { flex: 1; min-width: 0; }
     .position { font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; color: var(--text-faint); }
-    .lesson-info h3 { margin: .15rem 0 0; font-size: 1.05rem; }
+    .lesson-info h3 {
+      margin: .15rem 0 0; font-size: 1.05rem;
+      overflow-wrap: anywhere;
+    }
 
     .check {
       width: 28px; height: 28px;
@@ -319,54 +270,32 @@ declare global {
     .video { position: relative; padding-top: 56.25%; margin: 1rem 0 0; }
     .video iframe { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: var(--radius-sm); border: 0; }
 
-    .bookmarks-block {
-      margin-top: .75rem;
-      padding: .75rem;
-      background: var(--bg-elev-2);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-    }
-    .bm-add { display: grid; grid-template-columns: auto 100px 1fr auto; gap: .5rem; align-items: center; }
-    .bm-time-input, .bm-note-input { padding: .4rem .55rem; font-size: .85rem; }
-    .bm-list { display: flex; flex-direction: column; gap: .35rem; margin-top: .75rem; }
-    .bm-item {
-      display: flex; align-items: center; gap: .5rem;
-      padding: .35rem .5rem;
-      background: var(--bg-elev-1);
-      border-radius: var(--radius-sm);
-    }
-    .bm-time {
-      background: var(--accent); color: var(--accent-contrast);
-      border: none; padding: .2rem .55rem; border-radius: 99px;
-      font-weight: 700; font-size: .8rem; cursor: pointer;
-      font-family: ui-monospace, monospace;
-    }
-    .bm-time:hover { background: var(--accent-hover); }
-    .bm-note { flex: 1; color: var(--text); font-size: .85rem; }
-    .bm-del {
-      background: transparent; border: none; color: var(--text-faint);
-      cursor: pointer; padding: .15rem .35rem; font-size: .9rem;
-    }
-    .bm-del:hover { color: var(--danger); }
-    .bm-hint { margin: .5rem 0 0; }
-
     .markdown {
       line-height: 1.7; color: var(--text); margin-top: 1rem;
       max-width: 100%; min-width: 0;
-      overflow-wrap: anywhere; word-break: break-word;
+      overflow-wrap: break-word;
+      word-wrap: break-word;
     }
-    .markdown h1, .markdown h2, .markdown h3, .markdown h4 { margin: 1.25rem 0 .5rem; line-height: 1.3; }
+    .markdown h1, .markdown h2, .markdown h3, .markdown h4 {
+      margin: 1.25rem 0 .5rem; line-height: 1.3;
+      overflow-wrap: break-word;
+    }
     .markdown h1 { font-size: 1.5rem; }
     .markdown h2 { font-size: 1.25rem; }
     .markdown h3 { font-size: 1.05rem; }
     .markdown p { margin: .5rem 0; max-width: 100%; }
     .markdown ul, .markdown ol { padding-left: 1.5rem; margin: .5rem 0; }
     .markdown li { margin: .25rem 0; }
+    .markdown a {
+      color: var(--accent);
+      overflow-wrap: anywhere;
+    }
+    .markdown a:hover { text-decoration: underline; }
     .markdown code {
       background: var(--bg-elev-3); padding: .1rem .35rem;
       border-radius: 4px; font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
       font-size: .9em;
-      word-break: break-all;
+      overflow-wrap: anywhere;
     }
     .markdown pre {
       background: var(--bg-elev-3); padding: .85rem 1rem;
@@ -376,7 +305,7 @@ declare global {
     }
     .markdown pre code {
       background: transparent; padding: 0;
-      word-break: normal; white-space: pre;
+      overflow-wrap: normal; white-space: pre;
     }
     .markdown blockquote {
       border-left: 3px solid var(--accent);
@@ -385,13 +314,10 @@ declare global {
       color: var(--text-muted);
       background: var(--bg-elev-2);
     }
-    .markdown a { color: var(--accent); }
-    .markdown a:hover { text-decoration: underline; }
     .markdown img { max-width: 100%; height: auto; border-radius: var(--radius-sm); display: block; }
-    .markdown .table-wrap, .markdown table { max-width: 100%; }
     .markdown table {
       border-collapse: collapse; margin: .75rem 0;
-      display: block; overflow-x: auto;
+      display: block; overflow-x: auto; max-width: 100%;
     }
     .markdown th, .markdown td { border: 1px solid var(--border); padding: .35rem .65rem; text-align: left; }
     .markdown hr { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
@@ -407,7 +333,6 @@ declare global {
       .big-num { font-size: 2.25rem; }
       .course-head { flex-direction: column; }
       .vis-options { grid-template-columns: 1fr; }
-      .bm-add { grid-template-columns: 1fr; }
     }
   `]
 })
@@ -422,10 +347,6 @@ export class CourseDetailComponent implements OnInit {
   lessons = signal<Lesson[]>([]);
   completedSet = signal<Set<string>>(new Set());
   ownerNickname = signal<string | null>(null);
-  bookmarks = signal<LessonBookmark[]>([]);
-  manualTimes = signal<Record<string, string>>({});
-  bookmarkNotes = signal<Record<string, string>>({});
-  liveTimes = signal<Record<string, string>>({});
 
   loading = signal(false);
   error = signal<string | null>(null);
@@ -454,68 +375,32 @@ export class CourseDetailComponent implements OnInit {
   });
 
   private courseId!: string;
-  private players = new Map<string, any>();
-  private liveTickHandle: any = null;
 
   constructor(
     private route: ActivatedRoute,
     private router: Router,
     private coursesSvc: CoursesService,
     private auth: AuthService,
-    private bookmarksSvc: BookmarksService,
     private streakSvc: StreakService,
     private sanitizer: DomSanitizer
-  ) {
-    effect(() => {
-      const ls = this.lessons();
-      if (ls.length === 0) return;
-      setTimeout(() => this.setupYouTubePlayers(), 50);
-    });
-  }
+  ) {}
 
   async ngOnInit() {
     this.courseId = this.route.snapshot.paramMap.get('id')!;
     await this.load();
-    this.startLiveTick();
-  }
-
-  ngOnDestroy() {
-    if (this.liveTickHandle) clearInterval(this.liveTickHandle);
-    this.players.clear();
   }
 
   isCompleted(lessonId: string): boolean {
     return this.completedSet().has(lessonId);
   }
 
-  bookmarksFor(lessonId: string): LessonBookmark[] {
-    return this.bookmarks().filter(b => b.lesson_id === lessonId);
-  }
-
-  liveTime(lessonId: string): string {
-    return this.liveTimes()[lessonId] ?? '0:00';
-  }
-
-  formatTime = formatTimestamp;
-  youtubeId = (url: string | null): string | null => extractYouTubeId(url);
-  ytEmbedUrl(id: string): SafeResourceUrl {
-    return this.sanitizer.bypassSecurityTrustResourceUrl(
-      `https://www.youtube.com/embed/${id}?enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}`
-    );
-  }
   embedUrl(url: string | null): SafeResourceUrl | null {
     const embed = toYouTubeEmbed(url);
     return embed ? this.sanitizer.bypassSecurityTrustResourceUrl(embed) : null;
   }
+
   renderedContent(text: string | null): SafeHtml {
     return this.sanitizer.bypassSecurityTrustHtml(renderMarkdown(text));
-  }
-
-  setManualTime(lessonId: string, value: string) {
-    this.manualTimes.update(m => ({ ...m, [lessonId]: value }));
-  }
-  setBookmarkNote(lessonId: string, value: string) {
-    this.bookmarkNotes.update(m => ({ ...m, [lessonId]: value }));
   }
 
   async load() {
@@ -531,12 +416,6 @@ export class CourseDetailComponent implements OnInit {
       this.course.set(c);
       this.lessons.set(ls);
       this.completedSet.set(progress);
-
-      try {
-        const bms = await this.bookmarksSvc.listForLessons(ls.map(l => l.id));
-        this.bookmarks.set(bms);
-      } catch {}
-
       if (c.user_id !== this.auth.user()?.id) {
         try {
           const owner = await this.coursesSvc.getCourseOwner(c.user_id);
@@ -547,123 +426,6 @@ export class CourseDetailComponent implements OnInit {
       this.error.set(e.message);
     } finally {
       this.loading.set(false);
-    }
-  }
-
-  // ===== YouTube IFrame API =====
-
-  private async ensureYtApi(): Promise<void> {
-    if (window.YT?.Player) return;
-    return new Promise(resolve => {
-      const prev = window.onYouTubeIframeAPIReady;
-      window.onYouTubeIframeAPIReady = () => { prev?.(); resolve(); };
-      if (!document.querySelector('script[src*="youtube.com/iframe_api"]')) {
-        const tag = document.createElement('script');
-        tag.src = 'https://www.youtube.com/iframe_api';
-        document.body.appendChild(tag);
-      } else if (window.YT?.Player) {
-        resolve();
-      }
-    });
-  }
-
-  private async setupYouTubePlayers() {
-    await this.ensureYtApi();
-    const YT = window.YT;
-    if (!YT?.Player) return;
-    for (const l of this.lessons()) {
-      const id = extractYouTubeId(l.video_url);
-      if (!id) continue;
-      if (this.players.has(l.id)) continue;
-      const el = document.getElementById('yt-' + l.id);
-      if (!el) continue;
-      try {
-        const player = new YT.Player('yt-' + l.id, { events: { onReady: () => {} } });
-        this.players.set(l.id, player);
-      } catch {}
-    }
-  }
-
-  private startLiveTick() {
-    this.liveTickHandle = setInterval(() => {
-      const updates: Record<string, string> = {};
-      let changed = false;
-      for (const [lessonId, player] of this.players) {
-        try {
-          if (player?.getCurrentTime) {
-            const t = Math.floor(player.getCurrentTime());
-            const formatted = formatTimestamp(t);
-            if (this.liveTimes()[lessonId] !== formatted) {
-              updates[lessonId] = formatted;
-              changed = true;
-            }
-          }
-        } catch {}
-      }
-      if (changed) this.liveTimes.update(prev => ({ ...prev, ...updates }));
-    }, 1000);
-  }
-
-  seekTo(lessonId: string, seconds: number) {
-    const player = this.players.get(lessonId);
-    if (!player?.seekTo) {
-      const url = this.lessons().find(l => l.id === lessonId)?.video_url;
-      const ytId = extractYouTubeId(url ?? null);
-      if (ytId) window.open(`https://youtube.com/watch?v=${ytId}&t=${seconds}s`, '_blank');
-      return;
-    }
-    try {
-      player.seekTo(seconds, true);
-      player.playVideo?.();
-    } catch {}
-  }
-
-  async addBookmarkAtCurrent(lessonId: string) {
-    const player = this.players.get(lessonId);
-    if (!player?.getCurrentTime) {
-      this.error.set('Плеєр ще не готовий — спробуй за секунду');
-      return;
-    }
-    try {
-      const t = Math.floor(player.getCurrentTime());
-      const note = this.bookmarkNotes()[lessonId] ?? '';
-      const bm = await this.bookmarksSvc.add(lessonId, t, note);
-      this.bookmarks.update(arr => [...arr, bm].sort((a, b) =>
-        a.lesson_id === b.lesson_id ? a.timestamp_seconds - b.timestamp_seconds : 0
-      ));
-      this.setBookmarkNote(lessonId, '');
-    } catch (e: any) {
-      this.error.set(e.message);
-    }
-  }
-
-  async addBookmarkManual(lessonId: string) {
-    const raw = this.manualTimes()[lessonId];
-    if (!raw) return;
-    const seconds = parseTimestamp(raw);
-    if (seconds === null) {
-      this.error.set('Невірний формат часу. Приклади: 90, 1:30, 1:23:45');
-      return;
-    }
-    try {
-      const note = this.bookmarkNotes()[lessonId] ?? '';
-      const bm = await this.bookmarksSvc.add(lessonId, seconds, note);
-      this.bookmarks.update(arr => [...arr, bm].sort((a, b) =>
-        a.lesson_id === b.lesson_id ? a.timestamp_seconds - b.timestamp_seconds : 0
-      ));
-      this.setManualTime(lessonId, '');
-      this.setBookmarkNote(lessonId, '');
-    } catch (e: any) {
-      this.error.set(e.message);
-    }
-  }
-
-  async removeBookmark(id: string) {
-    try {
-      await this.bookmarksSvc.remove(id);
-      this.bookmarks.update(arr => arr.filter(b => b.id !== id));
-    } catch (e: any) {
-      this.error.set(e.message);
     }
   }
 
@@ -772,7 +534,6 @@ export class CourseDetailComponent implements OnInit {
         position: Number(this.lessonDraft.position) || 0
       });
       this.editingLessonId.set(null);
-      this.players.delete(id);
       await this.load();
     } catch (e: any) { this.error.set(e.message); }
   }
@@ -781,7 +542,6 @@ export class CourseDetailComponent implements OnInit {
     if (!confirm('Видалити урок?')) return;
     try {
       await this.coursesSvc.deleteLesson(id);
-      this.players.delete(id);
       await this.load();
     } catch (e: any) { this.error.set(e.message); }
   }
