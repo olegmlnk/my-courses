@@ -290,7 +290,7 @@ declare global {
     .finished { color: var(--success); font-weight: 600; margin: 0; }
 
     .lessons { display: flex; flex-direction: column; gap: .75rem; }
-    .lesson { padding: 1.25rem; transition: opacity .2s; }
+    .lesson { padding: 1.25rem; transition: opacity .2s; min-width: 0; overflow: hidden; }
     .lesson.done { opacity: .7; }
     .lesson.done .lesson-info h3 { text-decoration: line-through; color: var(--text-muted); }
 
@@ -350,24 +350,34 @@ declare global {
     .bm-del:hover { color: var(--danger); }
     .bm-hint { margin: .5rem 0 0; }
 
-    .markdown { line-height: 1.7; color: var(--text); margin-top: 1rem; }
+    .markdown {
+      line-height: 1.7; color: var(--text); margin-top: 1rem;
+      max-width: 100%; min-width: 0;
+      overflow-wrap: anywhere; word-break: break-word;
+    }
     .markdown h1, .markdown h2, .markdown h3, .markdown h4 { margin: 1.25rem 0 .5rem; line-height: 1.3; }
     .markdown h1 { font-size: 1.5rem; }
     .markdown h2 { font-size: 1.25rem; }
     .markdown h3 { font-size: 1.05rem; }
-    .markdown p { margin: .5rem 0; }
+    .markdown p { margin: .5rem 0; max-width: 100%; }
     .markdown ul, .markdown ol { padding-left: 1.5rem; margin: .5rem 0; }
     .markdown li { margin: .25rem 0; }
     .markdown code {
       background: var(--bg-elev-3); padding: .1rem .35rem;
       border-radius: 4px; font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
       font-size: .9em;
+      word-break: break-all;
     }
     .markdown pre {
       background: var(--bg-elev-3); padding: .85rem 1rem;
-      border-radius: var(--radius-sm); overflow-x: auto;
+      border-radius: var(--radius-sm);
+      overflow-x: auto; max-width: 100%;
+      white-space: pre;
     }
-    .markdown pre code { background: transparent; padding: 0; }
+    .markdown pre code {
+      background: transparent; padding: 0;
+      word-break: normal; white-space: pre;
+    }
     .markdown blockquote {
       border-left: 3px solid var(--accent);
       padding: .25rem 1rem;
@@ -377,8 +387,12 @@ declare global {
     }
     .markdown a { color: var(--accent); }
     .markdown a:hover { text-decoration: underline; }
-    .markdown img { max-width: 100%; border-radius: var(--radius-sm); }
-    .markdown table { border-collapse: collapse; margin: .75rem 0; }
+    .markdown img { max-width: 100%; height: auto; border-radius: var(--radius-sm); display: block; }
+    .markdown .table-wrap, .markdown table { max-width: 100%; }
+    .markdown table {
+      border-collapse: collapse; margin: .75rem 0;
+      display: block; overflow-x: auto;
+    }
     .markdown th, .markdown td { border: 1px solid var(--border); padding: .35rem .65rem; text-align: left; }
     .markdown hr { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
 
